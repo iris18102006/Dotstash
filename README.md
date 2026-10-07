@@ -1,5 +1,7 @@
 # dotstash
 
+![Tests](https://github.com/iris18102006/Dotstash/actions/workflows/tests.yml/badge.svg)
+
 Back up and restore your dotfiles with one command. Pure Python, no dependencies.
 
 You tell it which files matter (fish config, i3 config, `.bashrc`...), it keeps copies in a vault folder, and on a fresh machine one command puts everything back. The vault is a normal folder, so you can make it a git repo and push it to GitHub.
