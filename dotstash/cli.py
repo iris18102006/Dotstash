@@ -27,6 +27,10 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--force", action="store_true", help="allow paths that look like secrets")
     r = sub.add_parser("remove", help="stop tracking files or folders")
     r.add_argument("paths", nargs="+")
+    ig = sub.add_parser("ignore", help="never back up files matching a pattern, like 'fish_variables' or '*.key'")
+    ig.add_argument("patterns", nargs="*")
+    ig.add_argument("--list", action="store_true", dest="show", help="show the ignore list")
+    ig.add_argument("--remove", action="store_true", help="remove the patterns from the ignore list")
     sub.add_parser("list", help="show tracked files")
     sub.add_parser("status", help="compare your home folder with the vault")
     for name, text in (("backup", "copy tracked files from home into the vault"),
@@ -50,6 +54,18 @@ def run(argv: list[str] | None = None) -> int:
         elif args.cmd == "remove":
             core.remove(vault, args.paths)
             print("removed")
+        elif args.cmd == "ignore":
+            if args.show or not args.patterns:
+                print("built in: " + ", ".join(core.DEFAULT_IGNORE))
+                mine = core.patterns(vault)[len(core.DEFAULT_IGNORE):]
+                print("yours:    " + (", ".join(mine) if mine else "(none)"))
+            elif args.remove:
+                core.drop_ignore(vault, args.patterns)
+                print("removed from ignore list")
+            else:
+                for rel in core.add_ignore(vault, args.patterns):
+                    print(f"deleted from vault: {rel}")
+                print("ignoring: " + ", ".join(args.patterns))
         elif args.cmd == "list":
             files = core.load(vault)
             print("\n".join(f"~/{f}" for f in files) if files else "nothing tracked yet. Try: dotstash add ~/.bashrc")
