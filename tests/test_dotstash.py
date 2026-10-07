@@ -59,3 +59,42 @@ def test_cli_exit_codes(env, capsys):
     assert cli.run(["--vault", str(v), "status"]) == 0
     assert "synced" in capsys.readouterr().out
     assert cli.run(["--vault", str(v), "add", "nope"]) == 1
+
+
+def test_default_ignore_skips_fish_variables(env):
+    h, v = env
+    (h / ".config/fish").mkdir(parents=True)
+    (h / ".config/fish/config.fish").write_text("ok\n")
+    (h / ".config/fish/fish_variables").write_text("SETUVAR --export KEY:abc\n")
+    core.add(v, [".config/fish"])
+    assert (v / "files/.config/fish/config.fish").exists()
+    assert not (v / "files/.config/fish/fish_variables").exists()
+    assert core.state(".config/fish", v) == "synced"
+
+
+def test_ignore_pattern_purges_vault_and_blocks_backup(env):
+    h, v = env
+    (h / "conf").mkdir()
+    (h / "conf/a.txt").write_text("a")
+    (h / "conf/token.key").write_text("shh")
+    core.add(v, ["conf"])
+    assert (v / "files/conf/token.key").exists()
+    removed = core.add_ignore(v, ["*.key"])
+    assert removed == ["conf/token.key"]
+    (h / "conf/a.txt").write_text("b")
+    core.backup(v)
+    assert not (v / "files/conf/token.key").exists()
+    assert (v / "files/conf/a.txt").read_text() == "b"
+
+
+def test_restore_keeps_ignored_files_in_home(env):
+    h, v = env
+    (h / "conf").mkdir()
+    (h / "conf/a.txt").write_text("a")
+    (h / "conf/fish_variables").write_text("mine")
+    core.add(v, ["conf"])
+    (h / "conf/a.txt").write_text("edited")
+    core.restore(v)
+    assert (h / "conf/a.txt").read_text() == "a"
+    assert (h / "conf/fish_variables").read_text() == "mine"
+    assert (h / "conf/a.txt.dotstash.bak").read_text() == "edited"

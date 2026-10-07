@@ -30,6 +30,7 @@ dotstash restore                        # vault -> home
 | `init` | Create a new vault |
 | `add <paths>` | Start tracking files or folders |
 | `remove <paths>` | Stop tracking them |
+| `ignore <patterns>` | Never back up files matching a pattern (`ignore --list` to see them) |
 | `list` | Show everything tracked |
 | `status` | Compare home with the vault (synced, modified, missing) |
 | `backup [-n]` | Copy tracked files from home into the vault |
@@ -37,9 +38,21 @@ dotstash restore                        # vault -> home
 
 Use `--vault PATH` or the `DOTSTASH_VAULT` environment variable to put the vault somewhere else.
 
+## Ignoring files
+
+Some files inside a folder you track should never leave your machine. Tell dotstash to skip them:
+
+```bash
+dotstash ignore '*.key' secrets.fish
+dotstash ignore --list
+dotstash ignore --remove '*.key'
+```
+
+Patterns match file and folder names (shell style, so `*` works). Adding a pattern also deletes any matching files already in the vault. Built in, always ignored: `.git`, `__pycache__`, `fish_variables` (fish stores exported variables there, API keys included) and `*.dotstash.bak`.
+
 ## Safety
 
-- `restore` never overwrites silently. A file that differs is renamed to `name.dotstash.bak` first.
+- `restore` never overwrites silently. A file that differs is renamed to `name.dotstash.bak` first, and files that only exist in your home folder are left alone.
 - Paths that look like secrets (`~/.ssh`, `~/.gnupg`, `~/.aws`, files named `id_*`) are refused unless you pass `--force`. Do not push those to a public repo.
 - Only paths inside your home folder can be tracked.
 - `-n` / `--dry-run` shows what would happen without touching anything.
