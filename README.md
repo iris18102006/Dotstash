@@ -8,11 +8,10 @@ You tell it which files matter (fish config, i3 config, `.bashrc`...), it keeps 
 
 ```bash
 git clone https://github.com/iris18102006/dotstash.git
-cd dotstash
-pip install --user .
+pipx install ./dotstash
 ```
 
-Needs Python 3.9 or newer.
+Needs Python 3.9 or newer and [pipx](https://pipx.pypa.io). Plain `pip install` is blocked on recent Ubuntu and Debian, which is why this uses pipx. To update after pulling new code: `pipx install --force ./dotstash`.
 
 ## Usage
 
