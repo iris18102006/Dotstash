@@ -33,6 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     ig.add_argument("--remove", action="store_true", help="remove the patterns from the ignore list")
     sub.add_parser("list", help="show tracked files")
     sub.add_parser("status", help="compare your home folder with the vault")
+    d = sub.add_parser("diff", help="show line by line what backup would change")
+    d.add_argument("paths", nargs="*", help="only these tracked paths")
     for name, text in (("backup", "copy tracked files from home into the vault"),
                        ("restore", "copy tracked files from the vault into home")):
         s = sub.add_parser(name, help=text)
@@ -54,6 +56,16 @@ def run(argv: list[str] | None = None) -> int:
         elif args.cmd == "remove":
             core.remove(vault, args.paths)
             print("removed")
+        elif args.cmd == "diff":
+            changes = core.diff(vault, args.paths)
+            for _, text in changes:
+                for line in text.splitlines():
+                    code = "32" if line.startswith("+") and not line.startswith("+++") else \
+                           "31" if line.startswith("-") and not line.startswith("---") else \
+                           "36" if line.startswith("@@") else "0"
+                    print(paint(line, code))
+            if not changes:
+                print("no differences")
         elif args.cmd == "ignore":
             if args.show or not args.patterns:
                 print("built in: " + ", ".join(core.DEFAULT_IGNORE))

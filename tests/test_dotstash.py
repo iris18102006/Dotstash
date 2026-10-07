@@ -98,3 +98,26 @@ def test_restore_keeps_ignored_files_in_home(env):
     assert (h / "conf/a.txt").read_text() == "a"
     assert (h / "conf/fish_variables").read_text() == "mine"
     assert (h / "conf/a.txt.dotstash.bak").read_text() == "edited"
+
+
+def test_diff_shows_changes_and_new_files(env):
+    h, v = env
+    (h / "conf").mkdir()
+    (h / "conf/a.txt").write_text("one\ntwo\n")
+    core.add(v, ["conf"])
+    assert core.diff(v) == []
+    (h / "conf/a.txt").write_text("one\nthree\n")
+    (h / "conf/b.txt").write_text("new\n")
+    out = dict(core.diff(v))
+    assert "-two" in out["conf/a.txt"] and "+three" in out["conf/a.txt"]
+    assert "+new" in out["conf/b.txt"]
+    only = dict(core.diff(v, ["conf/b.txt"]))
+    assert list(only) == ["conf/b.txt"]  # a path inside a tracked folder works too
+
+
+def test_diff_binary(env):
+    h, v = env
+    (h / "blob").write_bytes(b"\xff\xfe\x00")
+    core.add(v, ["blob"])
+    (h / "blob").write_bytes(b"\xff\xfe\x01")
+    assert "Binary" in core.diff(v)[0][1]

@@ -1,6 +1,7 @@
 """Core logic: manifest handling, copying, and comparing."""
 from __future__ import annotations
 
+import difflib
 import filecmp
 import fnmatch
 import json
@@ -255,4 +256,48 @@ def restore(vault: Path, dry: bool = False) -> list[tuple[str, str]]:
             out.append((rel, notes[0]))
         else:
             out.append((rel, f"restored {len(notes)} files"))
+    return out
+
+
+def _lines(p: Path | None) -> list[str] | None:
+    """File as lines, [] if absent, None if it is binary."""
+    if p is None or not p.exists():
+        return []
+    try:
+        return p.read_text().splitlines(keepends=True)
+    except UnicodeDecodeError:
+        return None
+
+
+def diff(vault: Path, only: list[str] | None = None) -> list[tuple[str, str]]:
+    """Unified diffs of what `backup` would change: vault copy -> home copy.
+    Returns (label, text) for every file that differs."""
+    pats = patterns(vault)
+    wanted = {rel_to_home(p) for p in only} if only else None
+    out = []
+    for rel in load(vault):
+        if wanted is not None and not any(
+                w == rel or w.startswith(rel + "/") or rel.startswith(w + "/") for w in wanted):
+            continue
+        h, v = home() / rel, vault / "files" / rel
+        if not h.exists():
+            continue
+        a = _tree(v, pats) if v.exists() else {}
+        b = _tree(h, pats)
+        for sub in sorted(a.keys() | b.keys()):
+            fa, fb = a.get(sub), b.get(sub)
+            if fa and fb and filecmp.cmp(fa, fb, shallow=False):
+                continue
+            label = f"{rel}/{sub}" if sub else rel
+            if wanted is not None and not any(label == w or label.startswith(w + "/") for w in wanted):
+                continue
+            la, lb = _lines(fa), _lines(fb)
+            if la is None or lb is None:
+                out.append((label, f"Binary file {label} differs\n"))
+                continue
+            text = "".join(difflib.unified_diff(
+                la, lb,
+                fromfile=f"vault/{label}" if fa else "/dev/null",
+                tofile=f"~/{label}" if fb else "/dev/null"))
+            out.append((label, text))
     return out

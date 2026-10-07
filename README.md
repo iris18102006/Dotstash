@@ -21,6 +21,7 @@ Needs Python 3.9 or newer and [pipx](https://pipx.pypa.io). Plain `pip install` 
 dotstash init                          # create ~/dotstash-vault
 dotstash add ~/.config/fish ~/.config/i3/config ~/.bashrc
 dotstash status                        # what changed since the last backup?
+dotstash diff                          # see the actual lines that changed
 dotstash backup                        # home -> vault
 dotstash restore -n                    # dry run: see what a restore would do
 dotstash restore                        # vault -> home
@@ -34,6 +35,7 @@ dotstash restore                        # vault -> home
 | `ignore <patterns>` | Never back up files matching a pattern (`ignore --list` to see them) |
 | `list` | Show everything tracked |
 | `status` | Compare home with the vault (synced, modified, missing) |
+| `diff [paths]` | Show line by line what `backup` would change |
 | `backup [-n]` | Copy tracked files from home into the vault |
 | `restore [-n]` | Copy tracked files from the vault into home |
 
