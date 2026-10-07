@@ -41,6 +41,14 @@ dotstash restore                        # vault -> home
 
 Use `--vault PATH` or the `DOTSTASH_VAULT` environment variable to put the vault somewhere else.
 
+## Fish completions
+
+```bash
+cp completions/dotstash.fish ~/.config/fish/completions/
+```
+
+Open a new terminal and `dotstash <Tab>` lists the commands.
+
 ## Ignoring files
 
 Some files inside a folder you track should never leave your machine. Tell dotstash to skip them:
