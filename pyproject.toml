@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dotstash"
+version = "0.1.0"
+description = "Back up and restore your dotfiles with one command."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+dotstash = "dotstash.cli:main"
+
+[tool.setuptools]
+packages = ["dotstash"]
