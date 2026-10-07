@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import filecmp
+import fnmatch
 import json
 import os
 import shutil
 from pathlib import Path
 
 MANIFEST = "dotstash.json"
-IGNORE = shutil.ignore_patterns(".git", "__pycache__")
+# Never copied. fish_variables is here because `set -Ux` stores exported
+# variables (often API keys) in it.
+DEFAULT_IGNORE = [".git", "__pycache__", "fish_variables", "*.dotstash.bak"]
 # Paths that usually hold secrets. Refused unless --force is passed.
 SENSITIVE = (".ssh", ".gnupg", ".aws", ".password-store", ".netrc")
 
@@ -50,42 +53,97 @@ def init_vault(vault: Path) -> None:
     mf.write_text(json.dumps({"files": []}, indent=2) + "\n")
 
 
-def load(vault: Path) -> list[str]:
+def _read(vault: Path) -> dict:
     mf = vault / MANIFEST
     if not mf.exists():
         raise DotstashError(f"no vault at {vault}. Run: dotstash init")
     try:
-        return list(json.loads(mf.read_text())["files"])
+        data = json.loads(mf.read_text())
+        data["files"] = list(data["files"])
+        data["ignore"] = list(data.get("ignore", []))
+        return data
     except (ValueError, KeyError) as e:
         raise DotstashError(f"{mf} is broken: {e}") from None
 
 
+def _write(vault: Path, data: dict) -> None:
+    out = {"files": sorted(data["files"]), "ignore": sorted(data["ignore"])}
+    (vault / MANIFEST).write_text(json.dumps(out, indent=2) + "\n")
+
+
+def load(vault: Path) -> list[str]:
+    return _read(vault)["files"]
+
+
 def save(vault: Path, files: list[str]) -> None:
-    (vault / MANIFEST).write_text(json.dumps({"files": sorted(files)}, indent=2) + "\n")
+    data = _read(vault)
+    data["files"] = files
+    _write(vault, data)
+
+
+def patterns(vault: Path) -> list[str]:
+    """Built-in ignore patterns plus the ones you added."""
+    return DEFAULT_IGNORE + _read(vault)["ignore"]
+
+
+def ignored(name: str, pats: list[str]) -> bool:
+    return any(fnmatch.fnmatch(name, p) for p in pats)
+
+
+def add_ignore(vault: Path, pats: list[str]) -> list[str]:
+    """Add patterns, and delete anything they match from the vault."""
+    data = _read(vault)
+    for p in pats:
+        if p not in data["ignore"] and p not in DEFAULT_IGNORE:
+            data["ignore"].append(p)
+    _write(vault, data)
+    removed = []
+    allp = DEFAULT_IGNORE + data["ignore"]
+    root = vault / "files"
+    for dirpath, dirs, names in os.walk(root, topdown=True):
+        for n in list(dirs) + names:
+            if ignored(n, allp):
+                t = Path(dirpath) / n
+                removed.append(t.relative_to(root).as_posix())
+                shutil.rmtree(t) if t.is_dir() else t.unlink()
+                if n in dirs:
+                    dirs.remove(n)
+    return removed
+
+
+def drop_ignore(vault: Path, pats: list[str]) -> None:
+    data = _read(vault)
+    for p in pats:
+        if p not in data["ignore"]:
+            raise DotstashError(f"{p} is not in your ignore list")
+        data["ignore"].remove(p)
+    _write(vault, data)
 
 
 # ---------- copying ----------
-def _tree(p: Path) -> dict[str, Path]:
+def _tree(p: Path, pats: list[str]) -> dict[str, Path]:
     if p.is_file() or p.is_symlink():
         return {"": p}
     out: dict[str, Path] = {}
     for root, dirs, names in os.walk(p):
-        dirs[:] = [d for d in dirs if d not in (".git", "__pycache__")]
+        dirs[:] = [d for d in dirs if not ignored(d, pats)]
         for n in names:
-            f = Path(root) / n
-            out[f.relative_to(p).as_posix()] = f
+            if not ignored(n, pats):
+                f = Path(root) / n
+                out[f.relative_to(p).as_posix()] = f
     return out
 
 
-def copy(src: Path, dst: Path) -> None:
-    """Mirror src onto dst (dst is replaced)."""
+def copy(src: Path, dst: Path, pats: list[str]) -> None:
+    """Mirror src onto dst (dst is replaced). Ignored names are skipped."""
     if dst.is_dir() and not dst.is_symlink():
         shutil.rmtree(dst)
     elif dst.exists() or dst.is_symlink():
         dst.unlink()
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.is_dir():
-        shutil.copytree(src, dst, symlinks=True, ignore=IGNORE)
+        shutil.copytree(src, dst, symlinks=True,
+                        ignore=lambda d, names: {n for n in names if ignored(n, pats)})
     else:
         shutil.copy2(src, dst, follow_symlinks=False)
 
@@ -97,7 +155,8 @@ def state(rel: str, vault: Path) -> str:
         return "no-home"
     if not v.exists():
         return "no-backup"
-    a, b = _tree(h), _tree(v)
+    pats = patterns(vault)
+    a, b = _tree(h, pats), _tree(v, pats)
     if a.keys() != b.keys():
         return "modified"
     for k in a:
@@ -119,7 +178,7 @@ def add(vault: Path, paths: list[str], force: bool = False) -> list[str]:
         if rel not in files:
             files.append(rel)
             added.append(rel)
-        copy(home() / rel, vault / "files" / rel)
+        copy(home() / rel, vault / "files" / rel, patterns(vault))
     save(vault, files)
     return added
 
@@ -150,33 +209,50 @@ def backup(vault: Path, dry: bool = False) -> list[tuple[str, str]]:
             out.append((rel, "unchanged"))
         else:
             if not dry:
-                copy(home() / rel, vault / "files" / rel)
+                copy(home() / rel, vault / "files" / rel, patterns(vault))
             out.append((rel, "backed up"))
     return out
 
 
+def _put(src: Path, dst: Path, dry: bool) -> str | None:
+    """Put one file in place. An existing different file is kept as .dotstash.bak.
+    Returns a note, or None when nothing needed doing."""
+    if dst.is_file() and not dst.is_symlink() and filecmp.cmp(src, dst, shallow=False):
+        return None
+    note = "restored"
+    if dst.exists() or dst.is_symlink():
+        bak = dst.with_name(dst.name + ".dotstash.bak")
+        note = f"restored (old copy saved as {bak.name})"
+        if not dry:
+            if bak.exists() or bak.is_symlink():
+                shutil.rmtree(bak) if bak.is_dir() else bak.unlink()
+            dst.rename(bak)
+    if not dry:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst, follow_symlinks=False)
+    return note
+
+
 def restore(vault: Path, dry: bool = False) -> list[tuple[str, str]]:
-    """Copy tracked files from the vault into $HOME. Existing files that
-    differ are renamed to <name>.dotstash.bak first, never overwritten."""
+    """Copy tracked files from the vault into $HOME. File by file: anything
+    that differs is renamed to <name>.dotstash.bak first, and files that are
+    only in your home folder (like ignored ones) are left alone."""
+    pats = patterns(vault)
     out = []
     for rel in load(vault):
         src, dst = vault / "files" / rel, home() / rel
         if not src.exists():
             out.append((rel, "skipped (not in vault)"))
             continue
-        s = state(rel, vault)
-        if s == "synced":
+        notes = []
+        for sub, f in _tree(src, pats).items():
+            note = _put(f, dst / sub if sub else dst, dry)
+            if note:
+                notes.append(note)
+        if not notes:
             out.append((rel, "unchanged"))
-            continue
-        note = "restored"
-        if dst.exists() or dst.is_symlink():
-            bak = dst.with_name(dst.name + ".dotstash.bak")
-            note = f"restored (old copy saved as {bak.name})"
-            if not dry:
-                if bak.exists():
-                    shutil.rmtree(bak) if bak.is_dir() else bak.unlink()
-                dst.rename(bak)
-        if not dry:
-            copy(src, dst)
-        out.append((rel, note))
+        elif len(notes) == 1:
+            out.append((rel, notes[0]))
+        else:
+            out.append((rel, f"restored {len(notes)} files"))
     return out
